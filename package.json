@@ -1,0 +1,23 @@
+{
+  "name": "vika-pusher",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/pusher.ts",
+  "scripts": {
+    "dev": "LOG_LEVEL=debug bun run ./src/pusher.ts"
+  },
+  "keywords": [],
+  "author": "Togo",
+  "license": "ISC",
+  "dependencies": {
+    "@vikadata/vika": "^1.3.0",
+    "axios": "^1.4.0",
+    "axios-retry": "^4.4.2",
+    "ts-node": "^10.9.2",
+    "winston": "^3.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20.14.12"
+  }
+}
