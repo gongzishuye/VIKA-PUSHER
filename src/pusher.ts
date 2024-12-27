@@ -591,14 +591,26 @@ const componentFunctions: ComponentFunctions = {
             api.fxSpotQuote("HKD/CNY"),
         ]);
 
+        const [THBCNY, EURCNY, KRWCNY] = await Promise.all([
+            api.fxSpotQuote("CNY/THB"),
+            api.fxSpotQuote("EUR/CNY"),
+            api.fxSpotQuote("CNY/KRW")
+        ]);
+
         const exchangeRates: { [key: string]: number } = {
             "人民币": 1,
             "美元": parseFloat(USDCNH.toFixed(3)),
             "港币": parseFloat(HKDCNH.toFixed(3)),
+            "泰铢": parseFloat((1.0 / THBCNY).toFixed(3)),
+            "欧元": parseFloat(EURCNY.toFixed(3)),
+            "韩币": parseFloat((1.0 / KRWCNY).toFixed(5)),
             // todo: 要增加更多需要支持的汇率
         };
 
-        if (exchangeRates["美元"] === -1 || exchangeRates["港币"] === -1) {
+        if (exchangeRates["美元"] === -1 || exchangeRates["港币"] === -1
+            || exchangeRates["泰铢"] === -1 || exchangeRates["欧元"] === -1
+            || exchangeRates["韩币"] === -1
+        ) {
             logger.error("Failed to fetch exchange rates");
             return [];
         }
