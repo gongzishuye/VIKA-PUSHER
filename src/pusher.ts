@@ -10,6 +10,7 @@ interface Config {
     aktoolsURL: string;
     vikaToken: string;
     vikaDatasheetId: string;
+    vikaDatasheetIdExRate: string;
     vikaViewId: string;
     coingeckoApiKey: string;
     apiTimeout: number;
@@ -19,6 +20,7 @@ const CONFIG: Config = {
     aktoolsURL: "http://127.0.0.1:8080", // todo:
     vikaToken: "", // Your Vika token
     vikaDatasheetId: "dstxGhrxCvre4TKp36",
+    vikaDatasheetIdExRate: "dstNlVoLWMJeDez8rS",
     vikaViewId: "viwyDAMb2JjVD",
     coingeckoApiKey: "CG-u6fW2ohCTveS1FrqUVcNawYo",
     apiTimeout: 10000, // 10s
@@ -548,16 +550,18 @@ type VikaDatasheet = ReturnType<typeof Vika.prototype.datasheet>;
 
 // Global variable for Vika connector
 let vikaConnector: VikaDatasheet | null = null;
+let vikaConnectorExcRate: VikaDatasheet | null = null;
 
 // Component functions
 interface ComponentFunctions {
     vika_connector: (data: {
         token: string;
         datasheetId: string;
+        datesheetIdExcRate: string;
     }) => Promise<VikaDatasheet>;
-    vika_queryAll: () => Promise<VikaRecord[]>;
-    finance_query: (inputs: { query: VikaRecord[] }) => Promise<IRecord[]>;
-    vika_update: (inputs: { update: IRecord[] }) => Promise<string>;
+    vika_queryAll: (vikaConnector: VikaDatasheet | null) => Promise<VikaRecord[]>;
+    finance_query: (inputs: { query: VikaRecord[]; record: VikaRecord[]}) => Promise<{result:IRecord[]; resultExcRate:IRecord[]}>;
+    vika_update: (inputs: { vikaConnector: VikaDatasheet | null, update: IRecord[] }) => Promise<string>;
     vika_end: () => Promise<void>;
 }
 
@@ -565,14 +569,18 @@ const componentFunctions: ComponentFunctions = {
     vika_connector: async function (data: {
         token: string;
         datasheetId: string;
+        datesheetIdExcRate: string;
     }) {
         const vika = new Vika({token: data.token, fieldKey: "name"});
         const datasheet = vika.datasheet(data.datasheetId);
         vikaConnector = datasheet;
+
+        const datesheetIdExcRate = vika.datasheet(data.datesheetIdExcRate);
+        vikaConnectorExcRate = datesheetIdExcRate;
         return datasheet;
     },
 
-    vika_queryAll: async function () {
+    vika_queryAll: async function (vikaConnector: VikaDatasheet | null) {
         if (!vikaConnector) {
             throw new Error("Vika connector not found");
         }
@@ -584,7 +592,9 @@ const componentFunctions: ComponentFunctions = {
         return records;
     },
 
-    finance_query: async function (inputs: { query: VikaRecord[] }) {
+    finance_query: async function (inputs: { query: VikaRecord[], record: VikaRecord[] }) {
+        const resultExcRate: IRecord[] = [];
+        const result: IRecord[] = [];
         // todo: 要增加更多发币的汇率
         const [USDCNH, HKDCNH] = await Promise.all([
             api.fxSpotQuote("USD/CNY"),
@@ -612,10 +622,19 @@ const componentFunctions: ComponentFunctions = {
             || exchangeRates["韩币"] === -1
         ) {
             logger.error("Failed to fetch exchange rates");
-            return [];
+            return {result, resultExcRate};
         }
 
-        const result: IRecord[] = [];
+        for (const item of inputs.record) {
+            const key = item.fields!["标题"] as string;
+            resultExcRate.push({
+                recordId: item.recordId,
+                fields: {
+                    // ...item.fields,
+                    '汇率（对人民币）': exchangeRates[key],
+                },
+            });
+        }
 
         for (const item of inputs.query) {
             const {code, Type, exchange_name} = item.fields as {
@@ -666,16 +685,16 @@ const componentFunctions: ComponentFunctions = {
             }
         }
 
-        return result;
+        return {result, resultExcRate};
     },
 
-    vika_update: async function (inputs: { update: IRecord[] }) {
+    vika_update: async function (inputs: { vikaConnector: VikaDatasheet | null, update: IRecord[] }) {
         if (!vikaConnector) {
             throw new Error("Vika connector not found");
         }
         const chunkedRecords = utils.chunk(inputs.update, 10);
         for (const chunk of chunkedRecords) {
-            await vikaConnector.records.update(chunk);
+            await inputs.vikaConnector!.records.update(chunk);
         }
         return "Update successful";
     },
@@ -751,18 +770,22 @@ async function main() {
         await componentFunctions.vika_connector({
             token: CONFIG.vikaToken,
             datasheetId: CONFIG.vikaDatasheetId,
+            datesheetIdExcRate: CONFIG.vikaDatasheetIdExRate,
         });
 
         // 2. Query all records
-        const records = await componentFunctions.vika_queryAll();
+        const records = await componentFunctions.vika_queryAll(vikaConnector);
+        const recordsExcRate = await componentFunctions.vika_queryAll(vikaConnectorExcRate);
 
         // 3. Process records and fetch prices
-        const updatedRecords = await componentFunctions.finance_query({
+        const {result, resultExcRate} = await componentFunctions.finance_query({
             query: records,
+            record: recordsExcRate
         });
 
         // 4. Update records in Vika
-        await componentFunctions.vika_update({update: updatedRecords});
+        await componentFunctions.vika_update({vikaConnector, update: result});
+        await componentFunctions.vika_update({vikaConnector: vikaConnectorExcRate, update: resultExcRate});
 
         // 5. End execution
         await componentFunctions.vika_end();
